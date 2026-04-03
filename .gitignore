@@ -50,8 +50,14 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+*.err
+bx_enh_dbg.ini
 
 # debug information files
 *.dwo
+*.lst
+
 
 build/
+docs/
+src/bootloader/boot
