@@ -59,5 +59,7 @@ bx_enh_dbg.ini
 
 
 build/
+toolchain/
 docs/
 src/bootloader/boot
+tmp/
