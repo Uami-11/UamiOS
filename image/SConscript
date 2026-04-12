@@ -69,12 +69,11 @@ def create_filesystem(target: str, filesystem, reserved_sectors=0, offset=0):
 def find_symbol_in_map_file(map_file: str, symbol: str):
     with map_file.open('r') as fmap:
         for line in fmap:
-            if symbol in line:
-                match = re.search('0x([0-9a-fA-F]+)', line)
+            if re.search(r'\b' + re.escape(symbol) + r'\b', line):
+                match = re.search(r'0x([0-9a-fA-F]+)', line)
                 if match is not None:
                     return int(match.group(1), base=16)
     return None
-
 
 def install_stage1(target: str, stage1: str, stage2_offset, stage2_size, offset=0):
     # find stage1 map file
@@ -86,11 +85,12 @@ def install_stage1(target: str, stage1: str, stage2_offset, stage2_size, offset=
     if entry_offset is None:
         raise ValueError("Can't find __entry_start symbol in map file " + str(map_file))
     entry_offset -= 0x7c00
-
     stage2_start = find_symbol_in_map_file(map_file, 'stage2_location')
     if stage2_start is None:
         raise ValueError("Can't find stage2_location symbol in map file " + str(map_file))
     stage2_start -= 0x7c00
+
+    print(f"DEBUG: entry_offset={hex(entry_offset)} stage2_start={hex(stage2_start)}")
 
     with open(stage1, 'rb') as fstage1:
         with os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT), 'wb+') as ftarget:
@@ -198,15 +198,38 @@ def build_disk(image, stage1, stage2, kernel, files, env):
     mount_method = env['mountMethod']
     partition_offset = 2048
 
-    stage1_size = os.stat(stage1).st_size
     stage2_size = os.stat(stage2).st_size
     stage2_sectors = (stage2_size + SECTOR_SIZE - 1) // SECTOR_SIZE
 
     generate_image_file(image, size_sectors)
 
-    # create partition table
+    # create partition table ONCE
     print(f"> creating partition table...")
     create_partition_table(image, partition_offset)
+
+    # install MBR boot code AFTER partition table
+    print(f"> installing MBR...")
+    mbr_paths = [
+        '/usr/lib/syslinux/bios/mbr.bin',
+        '/usr/lib/syslinux/mbr/mbr.bin',
+        '/usr/lib/syslinux/mbr.bin',
+        '/usr/share/syslinux/mbr.bin',
+        '/usr/lib/SYSLINUX/MBR.bin',
+    ]
+    mbr_bin = None
+    for path in mbr_paths:
+        if os.path.exists(path):
+            mbr_bin = path
+            break
+
+    if mbr_bin is None:
+        raise ValueError("Could not find mbr.bin. Install syslinux.")
+
+    with open(mbr_bin, 'rb') as fmbr:
+        mbr_code = fmbr.read(446)
+    with open(image, 'r+b') as fimg:
+        fimg.seek(0)
+        fimg.write(mbr_code)   # ← actually call write with the data
 
     # create file system
     print(f"> formatting file using {file_system}...")
@@ -214,8 +237,9 @@ def build_disk(image, stage1, stage2, kernel, files, env):
 
     # install stage1
     print(f"> installing stage1...")
-    install_stage1(image, stage1, offset=partition_offset, stage2_offset=1, stage2_size=stage2_sectors)
- 
+    install_stage1(image, stage1, offset=partition_offset,
+                   stage2_offset=1, stage2_size=stage2_sectors)
+
     # install stage2
     print(f"> installing stage2...")
     install_stage2(image, stage2, offset=1, limit=partition_offset)
