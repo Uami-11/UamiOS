@@ -63,3 +63,9 @@ toolchain/
 docs/
 src/bootloader/boot
 tmp/
+
+
+*.err
+bx_enh_dbg.ini
+.sconsign.dblite
+__pycache__/

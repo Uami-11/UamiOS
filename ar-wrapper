@@ -1,9 +1,0 @@
-#!/bin/bash
-args=()
-skip=0
-for arg in "$@"; do
-    if [ "$skip" = "1" ]; then skip=0; continue; fi
-    if [ "$arg" = "--plugin" ]; then skip=1; continue; fi
-    args+=("$arg")
-done
-exec /usr/bin/ar "${args[@]}"

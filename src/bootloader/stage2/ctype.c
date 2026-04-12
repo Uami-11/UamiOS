@@ -1,5 +1,11 @@
 #include "ctype.h"
 
-bool islower(char chr) { return chr >= 'a' && chr <= 'z'; }
+bool islower(char chr)
+{
+    return chr >= 'a' && chr <= 'z';
+}
 
-char toupper(char chr) { return islower(chr) ? (chr - 'a' + 'A') : chr; }
+char toupper(char chr)
+{
+    return islower(chr) ? (chr - 'a' + 'A') : chr;
+}
