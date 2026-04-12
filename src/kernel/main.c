@@ -1,10 +1,15 @@
 #include "memory.h"
 #include "stdio.h"
+#include <arch/i686/irq.h>
 #include <hal/hal.h>
 #include <stdint.h>
 
 extern uint8_t __bss_start;
 extern uint8_t __end;
+
+void crash_me();
+
+void timer(Registers *regs) { printf("."); }
 
 void __attribute__((section(".entry"))) start(uint16_t bootDrive) {
 	memset(&__bss_start, 0, (&__end) - (&__bss_start));
@@ -13,18 +18,12 @@ void __attribute__((section(".entry"))) start(uint16_t bootDrive) {
 
 	clrscr();
 
-	printf("\r\n"
-		   "@@@  @@@   @@@@@@   @@@@@@@@@@   @@@   @@@@@@    @@@@@@   \r\n"
-		   "@@@  @@@  @@@@@@@@  @@@@@@@@@@@  @@@  @@@@@@@@  @@@@@@@   \r\n"
-		   "@@!  @@@  @@!  @@@  @@! @@! @@!  @@!  @@!  @@@  !@@       \r\n"
-		   "!@!  @!@  !@!  @!@  !@! !@! !@!  !@!  !@!  @!@  !@!       \r\n"
-		   "@!@  !@!  @!@!@!@!  @!! !!@ @!@  !!@  @!@  !@!  !!@@!!    \r\n"
-		   "!@!  !!!  !!!@!!!!  !@!   ! !@!  !!!  !@!  !!!   !!@!!!   \r\n"
-		   "!!:  !!!  !!:  !!!  !!:     !!:  !!:  !!:  !!!       !:!  \r\n"
-		   ":!:  !:!  :!:  !:!  :!:     :!:  :!:  :!:  !:!      !:!   \r\n"
-		   "::::: ::  ::   :::  :::     ::    ::  ::::: ::  :::: ::   \r\n"
-		   " : :  :    :   : :   :      :    :     : :  :   :: : :    \r\n"
-		   "\r\n");
+	printf("Hello from kernel!\n");
+
+	i686_IRQ_RegisterHandler(0, timer);
+
+	// crash_me();
+
 end:
 	for (;;)
 		;
