@@ -5,6 +5,7 @@ phys = 0x00100000;
 SECTIONS
 {
     . = phys;
+    __entry_start = .;
     
     .text               : { __text_start = .;       *(.text)    }
     .data               : { __data_start = .;       *(.data)    }

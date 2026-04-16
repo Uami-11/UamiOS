@@ -1,4 +1,5 @@
 #include "memory.h"
+#include "pmm.h"
 #include "stdio.h"
 #include <arch/i686/irq.h>
 #include <arch/i686/keyboard.h>
@@ -8,28 +9,37 @@
 #include <hal/hal.h>
 #include <stdint.h>
 
+// These symbols come from the linker script — mark kernel boundaries
+extern uint32_t __entry_start;
+extern uint32_t __end;
+
 extern void _init();
 
 void start(BootParams *bootParams) {
 	_init();
 	HAL_Initialize();
 
-	log_debug("Main", "Boot device: %x", bootParams->BootDevice);
-	log_debug("Main", "Memory regions: %d", bootParams->Memory.RegionCount);
-	for (int i = 0; i < bootParams->Memory.RegionCount; i++) {
-		log_debug("Main", "MEM: start=0x%llx length=0x%llx type=%x",
-				  bootParams->Memory.Regions[i].Begin,
-				  bootParams->Memory.Regions[i].Length,
-				  bootParams->Memory.Regions[i].Type);
-	}
+	// Physical memory manager
+	PMM_Initialize(bootParams, (uint32_t)&__entry_start, (uint32_t)&__end);
 
 	printf("UamiOS v0.1\n");
-	printf("Interrupts: initializing timer and keyboard...\n");
+	printf("Memory: %u KB free\n", PMM_GetFreePages() * 4);
 
-	i686_Timer_Initialize(100); // 100 Hz — dots appear ~10x/second
+	// Demo: allocate and free a few pages
+	void *a = PMM_AllocPage();
+	void *b = PMM_AllocPage();
+	void *c = PMM_AllocPage();
+	printf("Allocated pages: 0x%x  0x%x  0x%x\n", (uint32_t)a, (uint32_t)b,
+		   (uint32_t)c);
+
+	PMM_FreePage(b);
+	printf("Freed page 0x%x, free now: %u KB\n", (uint32_t)b,
+		   PMM_GetFreePages() * 4);
+
+	// Interrupts
+	// i686_Timer_Initialize(100);
 	i686_Keyboard_Initialize();
-
-	printf("Type something:\n");
+	printf("Interrupts active. Type something:\n");
 
 	for (;;)
 		;
