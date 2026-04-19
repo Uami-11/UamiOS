@@ -17,38 +17,42 @@ extern void _init();
 // --- demo tasks ---
 
 void taskA() {
+	int count = 0;
 	for (;;) {
-		printf("A");
-		// busy wait so output isn't too fast
-		for (volatile int i = 0; i < 5000000; i++)
-			;
+		printf("[A:%d] ", count++);
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
 	}
 }
 
 void taskB() {
+	int count = 0;
 	for (;;) {
-		printf("B");
-		for (volatile int i = 0; i < 5000000; i++)
-			;
+		printf("[B:%d] ", count++);
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
 	}
 }
 
 void taskC() {
+	int count = 0;
 	for (;;) {
-		printf("C");
-		for (volatile int i = 0; i < 5000000; i++)
-			;
+		printf("[C:%d] ", count++);
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
 	}
 }
-
-// --- timer handler that drives the scheduler ---
 
 static void timer_handler(Registers *regs) {
 	static uint32_t ticks = 0;
 	ticks++;
-	if (ticks % 200 == 0) // print a dot from the idle context every 2s
-		printf(".");
-	Scheduler_Tick(regs);
+	g_NeedSchedule = 1; // just signal, don't switch here
 }
 
 void start(BootParams *bootParams) {
@@ -60,23 +64,25 @@ void start(BootParams *bootParams) {
 	printf("UamiOS v0.1\n");
 	printf("Memory: %u KB free\n", PMM_GetFreePages() * 4);
 
-	// Set up scheduler and create three tasks
 	Scheduler_Initialize();
+	Scheduler_RegisterIdle();
 	Scheduler_CreateTask("taskA", taskA);
 	Scheduler_CreateTask("taskB", taskB);
 	Scheduler_CreateTask("taskC", taskC);
 
-	// Timer drives the scheduler
 	i686_Timer_Initialize(100);
-	i686_IRQ_RegisterHandler(0,
-							 timer_handler); // override default timer handler
+	i686_IRQ_RegisterHandler(0, timer_handler);
 	i686_IRQ_Unmask(0);
 
 	i686_Keyboard_Initialize();
 
 	printf("Scheduler running. Tasks: A B C\n");
 
-	// Idle loop — the scheduler will preempt this
-	for (;;)
-		;
+	// Main loop — drives the scheduler from normal context
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
 }

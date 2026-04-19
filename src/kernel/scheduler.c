@@ -9,12 +9,13 @@
 #define MODULE "SCHED"
 
 // How many timer ticks between context switches
-#define SCHEDULER_TICKS 50
+#define SCHEDULER_TICKS 500
 
 static Task g_Tasks[MAX_TASKS];
 static int g_TaskCount = 0;
 static int g_CurrentTask = 0;
 static int g_TickCount = 0;
+volatile int g_NeedSchedule = 0;
 
 // Defined in scheduler_asm.asm — does the actual register swap
 extern void Scheduler_Switch(uint32_t *oldEsp, uint32_t newEsp);
@@ -75,7 +76,9 @@ void Scheduler_CreateTask(const char *name, void (*entry)()) {
 	g_TaskCount++;
 }
 
-void Scheduler_Tick(Registers *regs) {
+void Scheduler_Tick(
+	Registers *regs) // regs unused now, keep signature for compat
+{
 	if (g_TaskCount == 0)
 		return;
 
@@ -84,23 +87,60 @@ void Scheduler_Tick(Registers *regs) {
 		return;
 	g_TickCount = 0;
 
-	// Find next ready task (round robin)
+	// Mark current task as ready
+	g_Tasks[g_CurrentTask].state = TASK_READY;
+
+	// Find next ready task
 	int next = (g_CurrentTask + 1) % g_TaskCount;
-	int checked = 0;
-	while (g_Tasks[next].state != TASK_READY && checked < g_TaskCount) {
+	int start = next;
+	while (g_Tasks[next].state != TASK_READY) {
 		next = (next + 1) % g_TaskCount;
-		checked++;
+		if (next == start)
+			return;
 	}
 
 	if (next == g_CurrentTask)
-		return; // only one runnable task, keep going
+		return;
 
 	int prev = g_CurrentTask;
 	g_CurrentTask = next;
-
-	g_Tasks[prev].state = TASK_READY;
 	g_Tasks[next].state = TASK_RUNNING;
 
-	// Save old ESP into prev task, load new ESP from next task
+	Scheduler_Switch(&g_Tasks[prev].esp, g_Tasks[next].esp);
+}
+// Call this once from main before creating other tasks.
+// Registers the currently executing context as task 0.
+void Scheduler_RegisterIdle() {
+	Task *task = &g_Tasks[0];
+	task->stack = NULL;
+	task->state = TASK_READY; // ← READY not RUNNING
+	task->esp = 0;
+	const char *name = "idle";
+	int i = 0;
+	while (name[i] && i < 31) {
+		task->name[i] = name[i];
+		i++;
+	}
+	task->name[i] = '\0';
+	g_TaskCount = 1;
+	g_CurrentTask = 0;
+	log_info(MODULE, "Registered idle task");
+}
+
+void Scheduler_Yield() {
+	g_Tasks[g_CurrentTask].state = TASK_READY;
+
+	int next = (g_CurrentTask + 1) % g_TaskCount;
+	int start = next;
+	while (g_Tasks[next].state != TASK_READY) {
+		next = (next + 1) % g_TaskCount;
+		if (next == start)
+			return;
+	}
+
+	int prev = g_CurrentTask;
+	g_CurrentTask = next;
+	g_Tasks[next].state = TASK_RUNNING;
+
 	Scheduler_Switch(&g_Tasks[prev].esp, g_Tasks[next].esp);
 }
