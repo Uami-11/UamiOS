@@ -144,3 +144,17 @@ void Scheduler_Yield() {
 
 	Scheduler_Switch(&g_Tasks[prev].esp, g_Tasks[next].esp);
 }
+
+int Scheduler_GetTaskCount() { return g_TaskCount; }
+
+void Scheduler_GetTask(int idx, char *nameOut, int *stateOut) {
+	if (idx < 0 || idx >= g_TaskCount)
+		return;
+	int i = 0;
+	while (g_Tasks[idx].name[i] && i < 31) {
+		nameOut[i] = g_Tasks[idx].name[i];
+		i++;
+	}
+	nameOut[i] = '\0';
+	*stateOut = (int)g_Tasks[idx].state;
+}

@@ -24,3 +24,5 @@ void Scheduler_CreateTask(const char *name, void (*entry)());
 void Scheduler_Tick(Registers *regs); // called by timer IRQ
 void Scheduler_RegisterIdle();
 void Scheduler_Yield();
+int Scheduler_GetTaskCount();
+void Scheduler_GetTask(int idx, char *nameOut, int *stateOut);
