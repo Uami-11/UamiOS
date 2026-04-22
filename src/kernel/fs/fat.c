@@ -454,6 +454,7 @@ void FAT_Close(FAT_File *file) {
 
 bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 	FAT_File *dir;
+
 	if (path == NULL || path[0] == '\0' ||
 		(path[0] == '/' && path[1] == '\0')) {
 		dir = &g_Data->RootDirectory.Public;
@@ -461,6 +462,7 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 		g_Data->RootDirectory.CurrentCluster =
 			g_Data->RootDirectory.FirstCluster;
 		g_Data->RootDirectory.CurrentSectorInCluster = 0;
+
 		disk_read(fat_cluster_to_lba(g_Data->RootDirectory.CurrentCluster), 1,
 				  g_Data->RootDirectory.Buffer);
 	} else {
@@ -473,44 +475,66 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 	}
 
 	FAT_DirectoryEntry entry;
+
 	while (FAT_ReadEntry(dir, &entry)) {
+
+		// End of directory
 		if (entry.Name[0] == 0x00)
 			break;
+
+		// Deleted entry
 		if ((uint8_t)entry.Name[0] == 0xE5)
 			continue;
+
+		// Long File Name entries
 		if (entry.Attributes == FAT_ATTRIBUTE_LFN)
 			continue;
+
+		// Skip volume label + system entries
 		if (entry.Attributes & FAT_ATTRIBUTE_VOLUME_ID)
 			continue;
+		if (entry.Attributes & FAT_ATTRIBUTE_SYSTEM)
+			continue;
 
-		// Convert 8.3 name to readable string
-		// Replace the name conversion block in FAT_ListDir with this:
+		// Validate first character (must be printable ASCII)
+		uint8_t first = (uint8_t)entry.Name[0];
+		if (first < 0x20 || first == 0x7F)
+			continue;
+		if (first == ' ')
+			continue;
+
+		// ── Convert 8.3 name ─────────────────────────────
 		char name[13];
 		int pos = 0;
 
-		// base name (8 chars, trim trailing spaces)
+		// Base name (trim trailing spaces)
 		int base_end = 8;
 		while (base_end > 0 && entry.Name[base_end - 1] == ' ')
 			base_end--;
+
 		for (int i = 0; i < base_end; i++)
 			name[pos++] = entry.Name[i];
 
-		// extension (3 chars, trim trailing spaces)
+		// Extension
 		int ext_end = 11;
 		while (ext_end > 8 && entry.Name[ext_end - 1] == ' ')
 			ext_end--;
+
 		if (ext_end > 8) {
 			name[pos++] = '.';
 			for (int i = 8; i < ext_end; i++)
 				name[pos++] = entry.Name[i];
 		}
+
 		name[pos] = '\0';
+
 		bool isDir = (entry.Attributes & FAT_ATTRIBUTE_DIRECTORY) != 0;
 		cb(name, isDir, entry.Size);
 	}
 
 	if (dir->Handle != ROOT_DIR_HANDLE)
 		FAT_Close(dir);
+
 	return true;
 }
 
@@ -834,4 +858,23 @@ not_found:
 
 uint32_t FAT_GetBytesPerCluster() {
 	return g_Data->BS.BootSector.SectorsPerCluster * SECTOR_SIZE;
+}
+
+// fat.c
+bool FAT_GetDiskInfo(FAT_DiskInfo *info) {
+	uint8_t spc = g_Data->BS.BootSector.SectorsPerCluster;
+	info->BytesPerCluster = spc * SECTOR_SIZE;
+	info->TotalClusters = (g_TotalSectors - g_DataSectionLba) / spc;
+	info->FreeClusters = 0;
+
+	// Walk the FAT counting free clusters (cluster 0 entry = FAT32)
+	uint32_t total = info->TotalClusters;
+	if (total > 65536)
+		total = 65536; // cap scan to avoid slowness
+
+	for (uint32_t c = 2; c < total + 2; c++) {
+		if (fat_next_cluster(c) == 0)
+			info->FreeClusters++;
+	}
+	return true;
 }

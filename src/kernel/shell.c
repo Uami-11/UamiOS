@@ -138,6 +138,14 @@ static void cmd_fastfetch(const char *args) {
 	uint32_t total_kb = PMM_GetTotalPages() * 4;
 	uint32_t used_kb = total_kb - free_kb;
 
+	FAT_DiskInfo disk = {0};
+	FAT_GetDiskInfo(&disk);
+	uint32_t disk_total_kb = (disk.TotalClusters * disk.BytesPerCluster) / 1024;
+	uint32_t disk_free_kb = (disk.FreeClusters * disk.BytesPerCluster) / 1024;
+	uint32_t disk_used_kb = disk_total_kb - disk_free_kb;
+	uint32_t disk_pct =
+		disk_total_kb > 0 ? (disk_used_kb * 100 / disk_total_kb) : 0;
+
 	printf("\n");
 	printf("@@@  @@@   @@@@@@   @@@@@@@@@@   @@@   @@@@@@    @@@@@@\n");
 	printf("@@@  @@@  @@@@@@@@  @@@@@@@@@@@  @@@  @@@@@@@@  @@@@@@@\n");
@@ -150,15 +158,17 @@ static void cmd_fastfetch(const char *args) {
 	printf("::::: ::  ::   :::  :::     ::    ::  ::::: ::  :::: ::\n");
 	printf(" : :  :    :   : :   :      :    :     : :  :   :: : :\n");
 	printf("\n");
-	printf("  OS       : UamiOS v0.1\n");
+	printf("  OS       : UamiOS v0.2\n");
 	printf("  Arch     : i686 (32-bit x86)\n");
 	printf("  Mode     : Protected Mode\n");
-	printf("  Memory   : %u KB used / %u KB total\n", used_kb, total_kb);
+	printf("  RAM      : %u KB used / %u KB total\n", used_kb, total_kb);
 	printf("  Free RAM : %u KB\n", free_kb);
+	printf("  Disk     : %u KB used / %u KB total (%u%%)\n", disk_used_kb,
+		   disk_total_kb, disk_pct);
+	printf("  Free Disk: %u KB\n", disk_free_kb);
 	printf("  Shell    : UamiShell v0.2\n");
 	printf("  Kernel   : Monolithic C kernel\n");
 	printf("  Boot     : Custom 2-stage FAT32 bootloader\n");
-	printf("\n");
 }
 
 static void cmd_meminfo(const char *args) {

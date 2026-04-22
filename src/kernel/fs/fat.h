@@ -24,6 +24,13 @@ typedef struct {
 	uint32_t Size;
 } FAT_File;
 
+// fat.h
+typedef struct {
+	uint32_t TotalClusters;
+	uint32_t FreeClusters;
+	uint32_t BytesPerCluster;
+} FAT_DiskInfo;
+
 enum FAT_Attributes {
 	FAT_ATTRIBUTE_READ_ONLY = 0x01,
 	FAT_ATTRIBUTE_HIDDEN = 0x02,
@@ -50,3 +57,4 @@ bool FAT_WriteFile(const char *path, const void *data, uint32_t size);
 typedef void (*FAT_ListCallback)(const char *name, bool isDir, uint32_t size);
 bool FAT_ListDir(const char *path, FAT_ListCallback cb);
 uint32_t FAT_GetBytesPerCluster();
+bool FAT_GetDiskInfo(FAT_DiskInfo *info);
