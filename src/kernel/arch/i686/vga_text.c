@@ -1,7 +1,6 @@
 #include <arch/i686/io.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 
 const unsigned SCREEN_WIDTH = 80;
 const unsigned SCREEN_HEIGHT = 25;
@@ -10,43 +9,51 @@ const uint8_t DEFAULT_COLOR = 0x7;
 uint8_t *g_ScreenBuffer = (uint8_t *)0xB8000;
 int g_ScreenX = 0, g_ScreenY = 0;
 
-// ── scrollback buffer ──────────────────────────────────────────────────────
-// Stores every line ever written. Each cell = char + attribute (2 bytes).
-// g_TotalLines: how many lines have been committed to the buffer.
-// g_ViewOffset: how many lines above the bottom we are currently viewing.
-//               0 = live view (bottom), positive = scrolled up.
-
+// ── scrollback ─────────────────────────────────────────────────────────────
 #define SCROLLBACK_LINES 200
 
+// Each line stores 80 chars + 80 attrs interleaved (char,attr,char,attr...)
 static uint8_t g_SBuf[SCROLLBACK_LINES][80 * 2];
-static int g_TotalLines = 1; // line 0 starts empty
-static int g_ViewOffset = 0;
 
-// Return pointer to a cell in the scrollback buffer
-static uint8_t *sb_cell(int line, int x) {
-	return &g_SBuf[line % SCROLLBACK_LINES][x * 2];
+// g_SBHead: the scrollback line index that corresponds to screen row 0
+// when we are in live view. Advances every time the screen scrolls up.
+static int g_SBHead = 0;	 // index of oldest on-screen line in scrollback
+static int g_SBCount = 0;	 // total lines stored (capped at SCROLLBACK_LINES)
+static int g_ViewOffset = 0; // 0=live, positive=scrolled up
+
+// Get a pointer to a cell in the scrollback buffer
+static inline uint8_t *sb_cell(int sbLine, int x) {
+	return &g_SBuf[((sbLine) % SCROLLBACK_LINES + SCROLLBACK_LINES) %
+				   SCROLLBACK_LINES][x * 2];
 }
 
-// Commit the current screen line to the scrollback buffer
-// (called when we move to a new line)
-static void sb_commit_line(int screenY) {
-	// The scrollback line that corresponds to screenY is:
-	int sbLine = g_TotalLines - (g_ScreenY - screenY) - 1;
-	// We just write all cells of the current logical line
-	(void)sbLine; // writing happens in putchr below
+// Copy current VGA screen into the scrollback buffer at the right position
+static void sb_sync_from_vga() {
+	// The on-screen lines map to scrollback lines [g_SBHead .. g_SBHead+24]
+	for (int row = 0; row < (int)SCREEN_HEIGHT; row++) {
+		int sbLine = g_SBHead + row;
+		for (int col = 0; col < (int)SCREEN_WIDTH; col++) {
+			uint8_t *cell = sb_cell(sbLine, col);
+			cell[0] = g_ScreenBuffer[2 * (row * SCREEN_WIDTH + col)];
+			cell[1] = g_ScreenBuffer[2 * (row * SCREEN_WIDTH + col) + 1];
+		}
+	}
 }
 
-// Flush from scrollback buffer to VGA memory based on current view offset
+// Render scrollback buffer to VGA at the current view offset
 static void sb_render() {
-	// Which scrollback line maps to screen row 0?
-	int topLine = g_TotalLines - SCREEN_HEIGHT - g_ViewOffset;
+	// live bottom line in scrollback = g_SBHead + SCREEN_HEIGHT - 1
+	// when offset=0 we show lines [g_SBHead .. g_SBHead+24]
+	// when offset=N we show lines [g_SBHead-N .. g_SBHead-N+24]
+	int topSB = g_SBHead - g_ViewOffset;
 
 	for (int row = 0; row < (int)SCREEN_HEIGHT; row++) {
-		int sbLine = topLine + row;
+		int sbLine = topSB + row;
 		for (int col = 0; col < (int)SCREEN_WIDTH; col++) {
 			uint8_t ch = 0;
 			uint8_t attr = DEFAULT_COLOR;
-			if (sbLine >= 0 && sbLine < g_TotalLines) {
+			// Only show lines that have been written
+			if (sbLine >= 0 && sbLine < g_SBCount + (int)SCREEN_HEIGHT) {
 				uint8_t *cell = sb_cell(sbLine, col);
 				ch = cell[0];
 				attr = cell[1];
@@ -60,20 +67,17 @@ static void sb_render() {
 // ── basic VGA helpers ──────────────────────────────────────────────────────
 
 void VGA_putchr(int x, int y, char c) {
-	// Write to VGA and to scrollback
 	g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x)] = c;
-
-	// Map screen y to scrollback line
-	int sbLine = g_TotalLines - SCREEN_HEIGHT + y;
-	if (sbLine >= 0) {
-		uint8_t *cell = sb_cell(sbLine, x);
-		cell[0] = (uint8_t)c;
-		cell[1] = DEFAULT_COLOR;
-	}
+	// Keep scrollback in sync
+	uint8_t *cell = sb_cell(g_SBHead + y, x);
+	cell[0] = (uint8_t)c;
+	cell[1] = DEFAULT_COLOR;
 }
 
 void VGA_putcolor(int x, int y, uint8_t color) {
 	g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x) + 1] = color;
+	uint8_t *cell = sb_cell(g_SBHead + y, x);
+	cell[1] = color;
 }
 
 char VGA_getchr(int x, int y) {
@@ -85,8 +89,13 @@ uint8_t VGA_getcolor(int x, int y) {
 }
 
 void VGA_setcursor(int x, int y) {
-	// Only show cursor when not scrolled back
-	int pos = (g_ViewOffset == 0) ? y * SCREEN_WIDTH + x : 0xFFFF;
+	if (g_ViewOffset != 0) {
+		// Hide cursor while scrolled back
+		i686_outb(0x3D4, 0x0A);
+		i686_outb(0x3D5, 0x20);
+		return;
+	}
+	int pos = y * SCREEN_WIDTH + x;
 	i686_outb(0x3D4, 0x0F);
 	i686_outb(0x3D5, (uint8_t)(pos & 0xFF));
 	i686_outb(0x3D4, 0x0E);
@@ -96,41 +105,46 @@ void VGA_setcursor(int x, int y) {
 void VGA_clrscr() {
 	for (int y = 0; y < (int)SCREEN_HEIGHT; y++)
 		for (int x = 0; x < (int)SCREEN_WIDTH; x++) {
-			VGA_putchr(x, y, '\0');
-			VGA_putcolor(x, y, DEFAULT_COLOR);
+			g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x)] = 0;
+			g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x) + 1] = DEFAULT_COLOR;
 		}
 	g_ScreenX = 0;
 	g_ScreenY = 0;
 	g_ViewOffset = 0;
-	VGA_setcursor(g_ScreenX, g_ScreenY);
+	g_SBHead = 0;
+	g_SBCount = 0;
+	VGA_setcursor(0, 0);
 }
 
-// Called when output scrolls the screen up by `lines` rows
+// Called when new content pushes screen up by `lines` rows
 void VGA_scrollback(int lines) {
-	// Shift screen content up
+	// Scroll VGA content up
 	for (int y = lines; y < (int)SCREEN_HEIGHT; y++)
 		for (int x = 0; x < (int)SCREEN_WIDTH; x++) {
-			VGA_putchr(x, y - lines, VGA_getchr(x, y));
-			VGA_putcolor(x, y - lines, VGA_getcolor(x, y));
+			g_ScreenBuffer[2 * ((y - lines) * SCREEN_WIDTH + x)] =
+				g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x)];
+			g_ScreenBuffer[2 * ((y - lines) * SCREEN_WIDTH + x) + 1] =
+				g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x) + 1];
 		}
 
-	// Clear new blank lines at bottom
+	// Clear new blank rows at bottom
 	for (int y = SCREEN_HEIGHT - lines; y < (int)SCREEN_HEIGHT; y++)
 		for (int x = 0; x < (int)SCREEN_WIDTH; x++) {
-			VGA_putchr(x, y, '\0');
-			VGA_putcolor(x, y, DEFAULT_COLOR);
+			g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x)] = 0;
+			g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x) + 1] = DEFAULT_COLOR;
 		}
 
 	g_ScreenY -= lines;
 
-	// Advance the scrollback total line count
-	g_TotalLines += lines;
-	if (g_TotalLines > SCROLLBACK_LINES)
-		g_TotalLines = SCROLLBACK_LINES;
+	// Advance scrollback head
+	g_SBHead += lines;
+	g_SBCount += lines;
+	if (g_SBCount > SCROLLBACK_LINES - (int)SCREEN_HEIGHT)
+		g_SBCount = SCROLLBACK_LINES - (int)SCREEN_HEIGHT;
 
-	// Clear the new scrollback lines
+	// Clear the new scrollback lines (they correspond to the blank rows)
 	for (int l = 0; l < lines; l++) {
-		int sbLine = g_TotalLines - lines + l;
+		int sbLine = g_SBHead + (SCREEN_HEIGHT - lines + l);
 		for (int x = 0; x < (int)SCREEN_WIDTH; x++) {
 			uint8_t *cell = sb_cell(sbLine, x);
 			cell[0] = 0;
@@ -140,7 +154,7 @@ void VGA_scrollback(int lines) {
 }
 
 void VGA_putc(char c) {
-	// If scrolled back, jump to live view on any output
+	// Any new output snaps back to live view
 	if (g_ViewOffset != 0) {
 		g_ViewOffset = 0;
 		sb_render();
@@ -150,28 +164,14 @@ void VGA_putc(char c) {
 	case '\n':
 		g_ScreenX = 0;
 		g_ScreenY++;
-		// Commit new blank line to scrollback
-		if (g_TotalLines < SCROLLBACK_LINES) {
-			// clear the new line in scrollback
-			int sbLine = g_TotalLines;
-			for (int x = 0; x < (int)SCREEN_WIDTH; x++) {
-				uint8_t *cell = sb_cell(sbLine, x);
-				cell[0] = 0;
-				cell[1] = DEFAULT_COLOR;
-			}
-			g_TotalLines++;
-		}
 		break;
-
 	case '\t':
 		for (int i = 0; i < 4 - (g_ScreenX % 4); i++)
 			VGA_putc(' ');
 		break;
-
 	case '\r':
 		g_ScreenX = 0;
 		break;
-
 	default:
 		VGA_putchr(g_ScreenX, g_ScreenY, c);
 		g_ScreenX++;
@@ -191,13 +191,13 @@ void VGA_putc(char c) {
 // ── scrollback navigation ──────────────────────────────────────────────────
 
 void VGA_ScrollUp(int lines) {
-	int maxScroll = g_TotalLines - SCREEN_HEIGHT;
-	if (maxScroll < 0)
-		maxScroll = 0;
+	int maxOffset = g_SBCount;
+	if (maxOffset <= 0)
+		return;
 
 	g_ViewOffset += lines;
-	if (g_ViewOffset > maxScroll)
-		g_ViewOffset = maxScroll;
+	if (g_ViewOffset > maxOffset)
+		g_ViewOffset = maxOffset;
 
 	sb_render();
 	VGA_setcursor(g_ScreenX, g_ScreenY);
@@ -208,6 +208,20 @@ void VGA_ScrollDown(int lines) {
 	if (g_ViewOffset < 0)
 		g_ViewOffset = 0;
 
-	sb_render();
+	if (g_ViewOffset == 0) {
+		// Restore live VGA content directly from screen buffer
+		// (VGA buffer is always correct, just re-show it)
+		// Nothing to do — sb_render at offset 0 should show live content
+		// but to be safe, copy live screen back from our shadow in scrollback
+		for (int y = 0; y < (int)SCREEN_HEIGHT; y++)
+			for (int x = 0; x < (int)SCREEN_WIDTH; x++) {
+				uint8_t *cell = sb_cell(g_SBHead + y, x);
+				g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x)] = cell[0];
+				g_ScreenBuffer[2 * (y * SCREEN_WIDTH + x) + 1] = cell[1];
+			}
+	} else {
+		sb_render();
+	}
+
 	VGA_setcursor(g_ScreenX, g_ScreenY);
 }

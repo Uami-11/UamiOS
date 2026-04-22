@@ -281,22 +281,120 @@ static void demo_task_c() {
 }
 // ── updated utop ───────────────────────────────────────────────────────────
 
+static void print_padded(const char *s, int width) {
+	int len = 0;
+	while (s[len]) {
+		printf("%c", s[len]);
+		len++;
+	}
+	while (len < width) {
+		printf(" ");
+		len++;
+	}
+}
+
+static void print_num_padded(uint32_t n, int width) {
+	// print number right-aligned in field of `width`
+	char buf[12];
+	int pos = 0;
+	if (n == 0) {
+		buf[pos++] = '0';
+	} else {
+		uint32_t tmp = n;
+		while (tmp) {
+			buf[pos++] = '0' + tmp % 10;
+			tmp /= 10;
+		}
+	}
+	// reverse
+	for (int i = 0; i < pos / 2; i++) {
+		char t = buf[i];
+		buf[i] = buf[pos - 1 - i];
+		buf[pos - 1 - i] = t;
+	}
+	buf[pos] = '\0';
+	int pad = width - pos;
+	while (pad-- > 0)
+		printf(" ");
+	for (int i = 0; i < pos; i++)
+		printf("%c", buf[i]);
+}
+
 static void cmd_utop(const char *args) {
 	int count = Scheduler_GetTaskCount();
+
 	printf("\n");
-	printf("  %-4s %-16s %-10s %-10s\n", "ID", "NAME", "STATE", "SCHEDULED");
-	printf("  ---- ---------------- ---------- ----------\n");
+	printf("  UamiOS Task Manager (utop)\n");
+	printf("  --------------------------\n");
+	printf("  Tasks: %d running / %d max slots\n", count, MAX_TASKS);
+	printf("  Scheduler: Round-Robin, quantum = 500 timer ticks (~5s)\n");
+	printf("  Timer: 100 Hz\n");
+	printf("\n");
+
+	// Header
+	printf("  ID  ");
+	printf("Name             ");
+	printf("State    ");
+	printf("Scheduled\n");
+	printf("  --- ");
+	printf("---------------- ");
+	printf("-------- ");
+	printf("---------\n");
+
 	for (int i = 0; i < count; i++) {
 		char name[33];
 		int state;
 		uint32_t scount;
 		Scheduler_GetTask(i, name, &state, &scount);
-		printf("  %-4d %-16s %-10s %u\n", i, name, state_name(state), scount);
+
+		printf("  ");
+		print_num_padded(i, 3);
+		printf(" ");
+		print_padded(name, 16);
+		printf(" ");
+		print_padded(state_name(state), 8);
+		printf(" ");
+		print_num_padded(scount, 9);
+		printf("\n");
 	}
+
 	printf("\n");
-	printf("  Total tasks: %d / %d\n", count, MAX_TASKS);
-	printf("  Round-robin quantum: %d timer ticks\n", 500);
+
+	// Show per-task explanation
+	printf("  Legend:\n");
+	printf("    READY   = waiting for CPU turn\n");
+	printf("    RUNNING = currently executing\n");
+	printf("    DEAD    = terminated, slot freed\n");
+	printf("    Scheduled = how many times this task got the CPU\n");
 	printf("\n");
+
+	// Show scheduling fairness if more than 1 non-idle task
+	if (count > 2) {
+		printf("  Scheduling fairness (non-idle tasks):\n");
+		uint32_t total_switches = 0;
+		for (int i = 1; i < count; i++) {
+			char name[33];
+			int state;
+			uint32_t sc;
+			Scheduler_GetTask(i, name, &state, &sc);
+			total_switches += sc;
+		}
+		for (int i = 1; i < count; i++) {
+			char name[33];
+			int state;
+			uint32_t sc;
+			Scheduler_GetTask(i, name, &state, &sc);
+			uint32_t pct = total_switches > 0 ? sc * 100 / total_switches : 0;
+			printf("    ");
+			print_padded(name, 16);
+			printf(" got ");
+			print_num_padded(pct, 3);
+			printf("%% of CPU time (");
+			print_num_padded(sc, 0);
+			printf(" switches)\n");
+		}
+		printf("\n");
+	}
 }
 
 // ── sched_demo ─────────────────────────────────────────────────────────────
