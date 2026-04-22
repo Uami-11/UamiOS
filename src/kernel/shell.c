@@ -1,4 +1,5 @@
 #include "shell.h"
+#include "fs/fat.h"
 #include "pmm.h"
 #include "scheduler.h"
 #include <arch/i686/io.h>
@@ -79,6 +80,7 @@ static void cmd_help(const char *args) {
 	printf("\n");
 	printf("UamiOS Shell - available commands:\n");
 	printf("\n");
+
 	printf("  System:\n");
 	printf("    help        show this message\n");
 	printf("    clear       clear the screen\n");
@@ -87,16 +89,28 @@ static void cmd_help(const char *args) {
 	printf("    reboot      restart the system\n");
 	printf("    shutdown    power off the system\n");
 	printf("\n");
+
 	printf("  Memory:\n");
 	printf("    meminfo     physical memory usage\n");
 	printf("    pmm_demo    interactive page allocator demo\n");
 	printf("\n");
+
 	printf("  Scheduling:\n");
 	printf("    utop        show tasks + schedule counts\n");
-	printf("    sched_demo  launch 3 tasks showing round-robin\n");
-	printf("    create <n>  create a new counting task\n");
+	printf("    sched_demo  round-robin scheduler demo\n");
+	printf("    create <n>  create a new counting task (demo use)\n");
 	printf("    kill <id>   kill a task by ID\n");
 	printf("\n");
+
+	printf("  Filesystem:\n");
+	printf("    ls [path]   list directory contents\n");
+	printf("    cat <file>  display file contents\n");
+	printf("    touch <f>   create empty file\n");
+	printf("    mkdir <d>   create directory\n");
+	printf("    rm <name>   delete file\n");
+	printf("    rmdir <d>   delete directory\n");
+	printf("\n");
+
 	printf("  Other:\n");
 	printf("    print <x>   echo text\n");
 	printf("    cow         a friendly cow\n");
@@ -534,6 +548,88 @@ static void cmd_shutdown(const char *args) {
 		;
 }
 
+static void ls_callback(const char *name, bool isDir, uint32_t size) {
+	if (isDir)
+		printf("  [DIR]  %s\n", name);
+	else
+		printf("  [FILE] %-20s  %u bytes\n", name, size);
+}
+
+static void cmd_ls(const char *args) {
+	const char *path = sh_skip(args);
+	if (*path == '\0')
+		path = "/";
+	printf("\nContents of %s:\n", path);
+	if (!FAT_ListDir(path, ls_callback))
+		printf("  (no such directory)\n");
+	printf("\n");
+}
+
+static void cmd_touch(const char *args) {
+	const char *name = sh_skip(args);
+	if (*name == '\0') {
+		printf("\nUsage: touch <filename>\n");
+		return;
+	}
+	if (FAT_CreateFile(name))
+		printf("\nCreated: %s\n", name);
+	else
+		printf("\nFailed to create: %s\n", name);
+}
+
+static void cmd_mkdir(const char *args) {
+	const char *name = sh_skip(args);
+	if (*name == '\0') {
+		printf("\nUsage: mkdir <dirname>\n");
+		return;
+	}
+	if (FAT_CreateDir(name))
+		printf("\nCreated directory: %s\n", name);
+	else
+		printf("\nFailed to create directory: %s\n", name);
+}
+
+static void cmd_rm(const char *args) {
+	const char *name = sh_skip(args);
+	if (*name == '\0') {
+		printf("\nUsage: rm <filename>\n");
+		return;
+	}
+	if (FAT_DeleteEntry(name))
+		printf("\nDeleted: %s\n", name);
+	else
+		printf("\nNot found: %s\n", name);
+}
+
+static void cmd_rmdir(const char *args) {
+	// rmdir is same as rm for us — just deletes the entry
+	cmd_rm(args);
+}
+
+static void cmd_cat(const char *args) {
+	const char *name = sh_skip(args);
+	if (*name == '\0') {
+		printf("\nUsage: cat <filename>\n");
+		return;
+	}
+
+	FAT_File *f = FAT_Open(name);
+	if (!f) {
+		printf("\nNot found: %s\n", name);
+		return;
+	}
+
+	printf("\n");
+	uint8_t buf[64];
+	uint32_t n;
+	while ((n = FAT_Read(f, sizeof(buf) - 1, buf)) > 0) {
+		buf[n] = '\0';
+		printf("%s", (char *)buf);
+	}
+	printf("\n");
+	FAT_Close(f);
+}
+
 // ── command dispatch ───────────────────────────────────────────────────────
 
 typedef struct {
@@ -546,12 +642,26 @@ static const Command g_Commands[] = {
 	{"clear", cmd_clear},
 	{"version", cmd_version},
 	{"fastfetch", cmd_fastfetch},
+
+	// Memory
 	{"meminfo", cmd_meminfo},
+	{"pmm_demo", cmd_pmm_demo},
+
+	// Scheduling
 	{"utop", cmd_utop},
 	{"sched_demo", cmd_sched_demo},
 	{"create", cmd_create},
 	{"kill", cmd_kill},
-	{"pmm_demo", cmd_pmm_demo},
+
+	// Filesystem
+	{"ls", cmd_ls},
+	{"cat", cmd_cat},
+	{"touch", cmd_touch},
+	{"mkdir", cmd_mkdir},
+	{"rm", cmd_rm},
+	{"rmdir", cmd_rmdir},
+
+	// Other
 	{"print", cmd_print},
 	{"cow", cmd_cow},
 	{"reboot", cmd_reboot},
