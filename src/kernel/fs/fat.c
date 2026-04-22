@@ -477,7 +477,22 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 	FAT_DirectoryEntry entry;
 
 	while (FAT_ReadEntry(dir, &entry)) {
-
+		// // Temporarily add to FAT_ListDir after reading entry, before
+		// filtering: if (entry.Name[0] != 0x00 && (uint8_t)entry.Name[0] !=
+		// 0xE5) {
+		// 	// Replace the RAW debug print with this:
+		// 	printf("RAW: ");
+		// 	for (int di = 0; di < 11; di++) {
+		// 		uint8_t b = (uint8_t)entry.Name[di];
+		// 		printf("%c%c ", "0123456789abcdef"[b >> 4],
+		// 			   "0123456789abcdef"[b & 0xf]);
+		// 	}
+		// 	printf("attr=");
+		// 	uint8_t a = entry.Attributes;
+		// 	printf("%c%c\n", "0123456789abcdef"[a >> 4],
+		// 		   "0123456789abcdef"[a & 0xf]);
+		// }
+		//
 		// End of directory
 		if (entry.Name[0] == 0x00)
 			break;
@@ -487,7 +502,7 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 			continue;
 
 		// Long File Name entries
-		if (entry.Attributes == FAT_ATTRIBUTE_LFN)
+		if ((entry.Attributes & 0x3F) == 0x0F)
 			continue;
 
 		// Skip volume label + system entries
@@ -501,6 +516,16 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 		if (first < 0x20 || first == 0x7F)
 			continue;
 		if (first == ' ')
+			continue;
+		// After the existing attribute filters, add:
+		bool hasNull = false;
+		for (int ni = 0; ni < 8; ni++) {
+			if (entry.Name[ni] == 0x00) {
+				hasNull = true;
+				break;
+			}
+		}
+		if (hasNull)
 			continue;
 
 		// ── Convert 8.3 name ─────────────────────────────

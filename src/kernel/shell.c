@@ -757,10 +757,11 @@ static void cmd_shutdown(const char *args) {
 }
 
 static void ls_callback(const char *name, bool isDir, uint32_t size) {
-	if (isDir)
+	if (isDir) {
 		printf("  [DIR]  %s\n", name);
-	else
-		printf("  [FILE] %-20s  %u bytes\n", name, size);
+	} else {
+		printf("  [FILE] %s  (%u bytes)\n", name, size);
+	}
 }
 
 static void cmd_ls(const char *args) {
