@@ -16,6 +16,7 @@ static int g_TaskCount = 0;
 static int g_CurrentTask = 0;
 static int g_TickCount = 0;
 volatile int g_NeedSchedule = 0;
+static uint32_t g_TimerTicks = 0;
 
 // Defined in scheduler_asm.asm — does the actual register swap
 extern void Scheduler_Switch(uint32_t *oldEsp, uint32_t newEsp);
@@ -76,12 +77,21 @@ void Scheduler_CreateTask(const char *name, void (*entry)()) {
 	g_TaskCount++;
 }
 
+uint32_t Scheduler_GetTicks() { return g_TimerTicks; }
+
+uint32_t Scheduler_GetScheduleCount(int idx) {
+	if (idx < 0 || idx >= g_TaskCount)
+		return 0;
+	return g_Tasks[idx].schedule_count;
+}
+
 void Scheduler_Tick(
 	Registers *regs) // regs unused now, keep signature for compat
 {
 	if (g_TaskCount == 0)
 		return;
 
+	g_TimerTicks++;
 	g_TickCount++;
 	if (g_TickCount < SCHEDULER_TICKS)
 		return;
@@ -106,6 +116,7 @@ void Scheduler_Tick(
 	g_CurrentTask = next;
 	g_Tasks[next].state = TASK_RUNNING;
 
+	g_Tasks[next].schedule_count++;
 	Scheduler_Switch(&g_Tasks[prev].esp, g_Tasks[next].esp);
 }
 // Call this once from main before creating other tasks.
@@ -142,12 +153,14 @@ void Scheduler_Yield() {
 	g_CurrentTask = next;
 	g_Tasks[next].state = TASK_RUNNING;
 
+	g_Tasks[next].schedule_count++;
 	Scheduler_Switch(&g_Tasks[prev].esp, g_Tasks[next].esp);
 }
 
 int Scheduler_GetTaskCount() { return g_TaskCount; }
 
-void Scheduler_GetTask(int idx, char *nameOut, int *stateOut) {
+void Scheduler_GetTask(int idx, char *nameOut, int *stateOut,
+					   uint32_t *countOut) {
 	if (idx < 0 || idx >= g_TaskCount)
 		return;
 	int i = 0;
@@ -157,4 +170,15 @@ void Scheduler_GetTask(int idx, char *nameOut, int *stateOut) {
 	}
 	nameOut[i] = '\0';
 	*stateOut = (int)g_Tasks[idx].state;
+	*countOut = g_Tasks[idx].schedule_count;
+}
+
+void Scheduler_KillTask(int idx) {
+	if (idx <= 0 || idx >= g_TaskCount)
+		return; // can't kill idle (0)
+	g_Tasks[idx].state = TASK_DEAD;
+	if (g_Tasks[idx].stack) {
+		PMM_FreePage(g_Tasks[idx].stack);
+		g_Tasks[idx].stack = NULL;
+	}
 }

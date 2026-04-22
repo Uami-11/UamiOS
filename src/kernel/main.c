@@ -8,6 +8,7 @@
 #include <arch/i686/timer.h>
 #include <boot/bootparams.h>
 #include <debug.h>
+#include <drivers/ata.h>
 #include <hal/hal.h>
 #include <stdint.h>
 
@@ -26,6 +27,15 @@ static void shell_task() {
 void start(BootParams *bootParams) {
 	_init();
 	HAL_Initialize();
+
+	if (ATA_Initialize()) {
+		uint8_t buf[512];
+		if (ATA_ReadSectors(0, 1, buf)) {
+			printf("ATA: sector 0 bytes 0-3: %x %x %x %x\n", buf[0], buf[1],
+				   buf[2], buf[3]);
+			// Should print: eb 58 90 (your stage1 jump instruction)
+		}
+	}
 
 	PMM_Initialize(bootParams, (uint32_t)&__entry_start, (uint32_t)&__end);
 

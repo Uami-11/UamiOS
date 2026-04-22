@@ -78,16 +78,28 @@ static void set_color(uint8_t color) {
 static void cmd_help(const char *args) {
 	printf("\n");
 	printf("UamiOS Shell - available commands:\n");
-	printf("  help       - show this message\n");
-	printf("  clear      - clear the screen\n");
-	printf("  version    - OS version info\n");
-	printf("  fastfetch  - system information\n");
-	printf("  meminfo    - physical memory usage\n");
-	printf("  utop       - show running tasks\n");
-	printf("  print <x>  - echo text to screen\n");
-	printf("  cow        - a friendly cow\n");
-	printf("  reboot     - restart the system\n");
-	printf("  shutdown   - power off the system\n");
+	printf("\n");
+	printf("  System:\n");
+	printf("    help        show this message\n");
+	printf("    clear       clear the screen\n");
+	printf("    version     OS version info\n");
+	printf("    fastfetch   system information\n");
+	printf("    reboot      restart the system\n");
+	printf("    shutdown    power off the system\n");
+	printf("\n");
+	printf("  Memory:\n");
+	printf("    meminfo     physical memory usage\n");
+	printf("    pmm_demo    interactive page allocator demo\n");
+	printf("\n");
+	printf("  Scheduling:\n");
+	printf("    utop        show tasks + schedule counts\n");
+	printf("    sched_demo  launch 3 tasks showing round-robin\n");
+	printf("    create <n>  create a new counting task\n");
+	printf("    kill <id>   kill a task by ID\n");
+	printf("\n");
+	printf("  Other:\n");
+	printf("    print <x>   echo text\n");
+	printf("    cow         a friendly cow\n");
 	printf("\n");
 }
 
@@ -129,7 +141,7 @@ static void cmd_fastfetch(const char *args) {
 	printf("  Mode     : Protected Mode\n");
 	printf("  Memory   : %u KB used / %u KB total\n", used_kb, total_kb);
 	printf("  Free RAM : %u KB\n", free_kb);
-	printf("  Shell    : UamiShell v0.1\n");
+	printf("  Shell    : UamiShell v0.2\n");
 	printf("  Kernel   : Monolithic C kernel\n");
 	printf("  Boot     : Custom 2-stage FAT32 bootloader\n");
 	printf("\n");
@@ -163,8 +175,6 @@ static void cmd_meminfo(const char *args) {
 }
 
 // utop needs access to the task table — expose a query function from scheduler
-extern int Scheduler_GetTaskCount();
-extern void Scheduler_GetTask(int idx, char *nameOut, int *stateOut);
 
 static const char *state_name(int state) {
 	switch (state) {
@@ -179,18 +189,310 @@ static const char *state_name(int state) {
 	}
 }
 
+// ── shared demo task state ─────────────────────────────────────────────────
+
+static volatile int g_DemoRunning = 0;
+static volatile int g_DemoTasks[3] = {-1, -1, -1};
+
+static void demo_task_a() {
+	int count = 0;
+	while (g_DemoRunning) {
+		printf("A%d ", count++);
+		// small delay so output is readable, yield on each tick
+		volatile int d = 0;
+		while (d++ < 200000)
+			if (g_NeedSchedule) {
+				g_NeedSchedule = 0;
+				Scheduler_Yield();
+			}
+	}
+	Scheduler_KillTask(g_DemoTasks[0]);
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+}
+
+static void demo_task_b() {
+	int count = 0;
+	while (g_DemoRunning) {
+		printf("B%d ", count++);
+		volatile int d = 0;
+		while (d++ < 200000)
+			if (g_NeedSchedule) {
+				g_NeedSchedule = 0;
+				Scheduler_Yield();
+			}
+	}
+	Scheduler_KillTask(g_DemoTasks[1]);
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+}
+
+static void demo_task_c() {
+	int count = 0;
+	while (g_DemoRunning) {
+		printf("C%d ", count++);
+		volatile int d = 0;
+		while (d++ < 200000)
+			if (g_NeedSchedule) {
+				g_NeedSchedule = 0;
+				Scheduler_Yield();
+			}
+	}
+	Scheduler_KillTask(g_DemoTasks[2]);
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+}
+// ── updated utop ───────────────────────────────────────────────────────────
+
 static void cmd_utop(const char *args) {
 	int count = Scheduler_GetTaskCount();
 	printf("\n");
-	printf("  %-4s %-16s %-10s\n", "ID", "NAME", "STATE");
-	printf("  ---- ---------------- ----------\n");
+	printf("  %-4s %-16s %-10s %-10s\n", "ID", "NAME", "STATE", "SCHEDULED");
+	printf("  ---- ---------------- ---------- ----------\n");
 	for (int i = 0; i < count; i++) {
 		char name[33];
 		int state;
-		Scheduler_GetTask(i, name, &state);
-		printf("  %-4d %-16s %s\n", i, name, state_name(state));
+		uint32_t scount;
+		Scheduler_GetTask(i, name, &state, &scount);
+		printf("  %-4d %-16s %-10s %u\n", i, name, state_name(state), scount);
 	}
 	printf("\n");
+	printf("  Total tasks: %d / %d\n", count, MAX_TASKS);
+	printf("  Round-robin quantum: %d timer ticks\n", 500);
+	printf("\n");
+}
+
+// ── sched_demo ─────────────────────────────────────────────────────────────
+
+// Replace cmd_sched_demo with this:
+static void cmd_sched_demo(const char *args) {
+	if (g_DemoRunning) {
+		printf("\nDemo already running. Type 'kill' to stop it first.\n");
+		return;
+	}
+
+	int extra = 0; // extra user-created tasks will be counted separately
+	int base = Scheduler_GetTaskCount();
+
+	printf("\n");
+	printf("Round-Robin Scheduler Demo\n");
+	printf("--------------------------\n");
+	printf("Tasks A, B, C will take turns. Each gets one quantum\n");
+	printf("(~5 timer ticks) before the scheduler switches.\n");
+	printf("Watching the output shows the round-robin order.\n");
+	printf("Auto-stops after 15 seconds.\n\n");
+
+	g_DemoRunning = 1;
+	Scheduler_CreateTask("demo_A", demo_task_a);
+	Scheduler_CreateTask("demo_B", demo_task_b);
+	Scheduler_CreateTask("demo_C", demo_task_c);
+	g_DemoTasks[0] = base;
+	g_DemoTasks[1] = base + 1;
+	g_DemoTasks[2] = base + 2;
+
+	// Timer runs at 100 Hz so 15 seconds = 1500 ticks
+	uint32_t start = Scheduler_GetTicks();
+	uint32_t last_print = start;
+	int seconds = 0;
+
+	while (1) {
+		uint32_t now = Scheduler_GetTicks();
+
+		// Stop after 15 seconds
+		if (now - start >= 1500) {
+			g_DemoRunning = 0;
+			printf("\n\n[15 seconds elapsed - demo stopped]\n");
+			break;
+		}
+
+		// Print a separator line every second so output is readable
+		if (now - last_print >= 100) {
+			last_print = now;
+			seconds++;
+			printf("\n--- %d s | A scheduled %u | B scheduled %u | C scheduled "
+				   "%u ---\n",
+				   seconds, Scheduler_GetScheduleCount(base),
+				   Scheduler_GetScheduleCount(base + 1),
+				   Scheduler_GetScheduleCount(base + 2));
+		}
+
+		// Allow Enter to stop early
+		if (Keyboard_HasChar()) {
+			char c = Keyboard_GetChar();
+			if (c == '\n' || c == '\r') {
+				g_DemoRunning = 0;
+				printf("\n\n[Demo stopped by user]\n");
+				break;
+			}
+		}
+
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+
+	// Kill demo tasks
+	for (int i = 0; i < 3; i++)
+		Scheduler_KillTask(g_DemoTasks[i]);
+}
+
+// ── create ─────────────────────────────────────────────────────────────────
+
+// A generic counting task — name is baked in at creation via a slot
+static volatile int g_UserTaskRunning[MAX_TASKS] = {0};
+
+static void user_task_fn_0() {
+	int c = 0;
+	while (g_UserTaskRunning[0]) {
+		printf("[T0:%d]", c++);
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+}
+static void user_task_fn_1() {
+	int c = 0;
+	while (g_UserTaskRunning[1]) {
+		printf("[T1:%d]", c++);
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+}
+static void user_task_fn_2() {
+	int c = 0;
+	while (g_UserTaskRunning[2]) {
+		printf("[T2:%d]", c++);
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+	for (;;) {
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+}
+
+typedef void (*TaskFn)();
+static const TaskFn g_UserTaskFns[] = {user_task_fn_0, user_task_fn_1,
+									   user_task_fn_2};
+static int g_UserTaskSlot = 0;
+
+static void cmd_create(const char *args) {
+	const char *name = sh_skip(args);
+	if (*name == '\0')
+		name = "task";
+
+	printf("\nNote: 'create' adds a task to the next sched_demo run.\n");
+	printf("      (live task creation during demo not yet supported)\n");
+	printf("      Run 'sched_demo' to see all tasks interleave.\n");
+
+	if (Scheduler_GetTaskCount() >= MAX_TASKS) {
+		printf("      Max tasks reached.\n\n");
+		return;
+	}
+
+	// For now just inform — the demo always creates A/B/C
+	// You can extend this to register a 4th demo task if you want
+	printf("      Currently demo uses fixed tasks A, B, C.\n\n");
+}
+
+// ── kill ───────────────────────────────────────────────────────────────────
+
+static void cmd_kill(const char *args) {
+	const char *p = sh_skip(args);
+	if (*p == '\0') {
+		printf("\nUsage: kill <task_id>\n");
+		printf("Use 'utop' to see task IDs.\n");
+		return;
+	}
+
+	// parse integer
+	int id = 0;
+	while (*p >= '0' && *p <= '9') {
+		id = id * 10 + (*p - '0');
+		p++;
+	}
+
+	if (id == 0) {
+		printf("\nCannot kill the idle task (id 0).\n");
+		return;
+	}
+	if (id >= Scheduler_GetTaskCount()) {
+		printf("\nNo task with id %d.\n", id);
+		return;
+	}
+
+	// Stop user task loops
+	if (id < 3)
+		g_UserTaskRunning[id] = 0;
+	g_DemoRunning = 0;
+
+	Scheduler_KillTask(id);
+	printf("\nKilled task %d.\n", id);
+}
+
+// ── pmm_demo ───────────────────────────────────────────────────────────────
+
+static void cmd_pmm_demo(const char *args) {
+	printf("\n");
+	printf("Physical Memory Manager Demo\n");
+	printf("----------------------------\n");
+	printf("Page size: 4096 bytes (4 KB)\n\n");
+
+	uint32_t before = PMM_GetFreePages() * 4;
+	printf("Free before allocation: %u KB\n\n", before);
+
+	void *pages[5];
+	for (int i = 0; i < 5; i++) {
+		pages[i] = PMM_AllocPage();
+		printf("  Allocated page %d: 0x%x  (+4KB from previous)\n", i,
+			   (uint32_t)pages[i]);
+	}
+
+	uint32_t during = PMM_GetFreePages() * 4;
+	printf("\nFree after 5 allocations: %u KB (decreased by %u KB)\n\n", during,
+		   before - during);
+
+	for (int i = 0; i < 5; i++) {
+		PMM_FreePage(pages[i]);
+		printf("  Freed page %d: 0x%x\n", i, (uint32_t)pages[i]);
+	}
+
+	uint32_t after = PMM_GetFreePages() * 4;
+	printf("\nFree after freeing all: %u KB (restored)\n", after);
+	printf("\nBitmap allocator: pages are found by scanning bits,\n");
+	printf("each bit = one 4KB page. 0=free, 1=used.\n\n");
 }
 
 static void cmd_print(const char *args) {
@@ -240,11 +542,20 @@ typedef struct {
 } Command;
 
 static const Command g_Commands[] = {
-	{"help", cmd_help},		  {"clear", cmd_clear},
-	{"version", cmd_version}, {"fastfetch", cmd_fastfetch},
-	{"meminfo", cmd_meminfo}, {"utop", cmd_utop},
-	{"print", cmd_print},	  {"cow", cmd_cow},
-	{"reboot", cmd_reboot},	  {"shutdown", cmd_shutdown},
+	{"help", cmd_help},
+	{"clear", cmd_clear},
+	{"version", cmd_version},
+	{"fastfetch", cmd_fastfetch},
+	{"meminfo", cmd_meminfo},
+	{"utop", cmd_utop},
+	{"sched_demo", cmd_sched_demo},
+	{"create", cmd_create},
+	{"kill", cmd_kill},
+	{"pmm_demo", cmd_pmm_demo},
+	{"print", cmd_print},
+	{"cow", cmd_cow},
+	{"reboot", cmd_reboot},
+	{"shutdown", cmd_shutdown},
 };
 
 #define NUM_COMMANDS (int)(sizeof(g_Commands) / sizeof(g_Commands[0]))

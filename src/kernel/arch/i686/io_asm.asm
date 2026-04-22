@@ -46,3 +46,11 @@ i686_outw:
     mov ax, [esp + 8]
     out dx, ax
     ret
+
+global i686_inw
+i686_inw:
+    [bits 32]
+    mov dx, [esp + 4]
+    xor eax, eax
+    in ax, dx
+    ret
