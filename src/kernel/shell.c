@@ -50,6 +50,7 @@ static const char *sh_skip(const char *s) {
 static char g_Line[LINE_MAX];
 static int g_LineLen = 0;
 static bool g_LineReady = false;
+static char g_CWD[256] = "/"; // current working directory
 
 // ── VGA color helpers ──────────────────────────────────────────────────────
 // We write directly to the VGA attribute byte so individual commands
@@ -74,6 +75,41 @@ static void set_color(uint8_t color) {
 // If you want colour, add:
 //   void VGA_setcolor(uint8_t c) { g_CurrentColor = c; }
 // and use it in VGA_putchr.
+static void build_path(const char *name, char *out, int outSize) {
+	if (name[0] == '/') {
+		// absolute path
+		int i = 0;
+		while (name[i] && i < outSize - 1) {
+			out[i] = name[i];
+			i++;
+		}
+		out[i] = '\0';
+		return;
+	}
+
+	if (g_CWD[0] == '/' && g_CWD[1] == '\0') {
+		// CWD is root
+		out[0] = '/';
+		int i = 0, j = 1;
+		while (name[i] && j < outSize - 1) {
+			out[j++] = name[i++];
+		}
+		out[j] = '\0';
+	} else {
+		// CWD is a subdirectory
+		int i = 0, j = 0;
+		while (g_CWD[i] && j < outSize - 1) {
+			out[j++] = g_CWD[i++];
+		}
+		if (j < outSize - 1)
+			out[j++] = '/';
+		i = 0;
+		while (name[i] && j < outSize - 1) {
+			out[j++] = name[i++];
+		}
+		out[j] = '\0';
+	}
+}
 
 // ── commands ───────────────────────────────────────────────────────────────
 
@@ -104,6 +140,7 @@ static void cmd_help(const char *args) {
 	printf("\n");
 
 	printf("  Filesystem:\n");
+	printf("    cd [dir]   change directory (cd .. to go up)\n");
 	printf("    ls [path]   list directory contents\n");
 	printf("    cat <file>  display file contents\n");
 	printf("    touch <f>   create empty file\n");
@@ -472,6 +509,68 @@ static void cmd_sched_demo(const char *args) {
 		Scheduler_KillTask(g_DemoTasks[i]);
 }
 
+static void cmd_cd(const char *args) {
+	const char *target = sh_skip(args);
+
+	// cd with no args goes to root
+	if (*target == '\0' || (target[0] == '/' && target[1] == '\0')) {
+		g_CWD[0] = '/';
+		g_CWD[1] = '\0';
+		printf("\n/\n");
+		return;
+	}
+
+	// Handle cd ..
+	if (target[0] == '.' && target[1] == '.' && target[2] == '\0') {
+		// Strip last component from CWD
+		if (g_CWD[0] == '/' && g_CWD[1] == '\0') {
+			printf("\nAlready at root.\n");
+			return;
+		}
+		// Find last slash
+		int len = 0;
+		while (g_CWD[len])
+			len++;
+		int i = len - 1;
+		while (i > 0 && g_CWD[i] != '/')
+			i--;
+		if (i == 0) {
+			g_CWD[0] = '/';
+			g_CWD[1] = '\0';
+		} else {
+			g_CWD[i] = '\0';
+		}
+		printf("\n%s\n", g_CWD);
+		return;
+	}
+
+	// Build full path and verify it exists as a directory
+	char fullPath[256];
+	build_path(target, fullPath, sizeof(fullPath));
+
+	FAT_File *f = FAT_Open(fullPath);
+	if (!f) {
+		printf("\nNo such directory: %s\n", target);
+		return;
+	}
+	if (!f->IsDirectory) {
+		FAT_Close(f);
+		printf("\nNot a directory: %s\n", target);
+		return;
+	}
+	FAT_Close(f);
+
+	// Update CWD
+	int i = 0;
+	while (fullPath[i] && i < 255) {
+		g_CWD[i] = fullPath[i];
+		i++;
+	}
+	g_CWD[i] = '\0';
+
+	printf("\n%s\n", g_CWD);
+}
+
 // ── create ─────────────────────────────────────────────────────────────────
 
 // A generic counting task — name is baked in at creation via a slot
@@ -670,8 +769,12 @@ static void cmd_print(const char *args) {
 	text[tlen < LINE_MAX - 1 ? tlen : LINE_MAX - 1] = '\0';
 
 	// Filename
+
 	const char *fname = sh_skip(gt + (append ? 2 : 1));
-	if (*fname == '\0') {
+	char fpath[256];
+	build_path(fname, fpath, sizeof(fpath));
+
+	if (*fpath == '\0') {
 		printf("\nprint: missing filename after >\n");
 		return;
 	}
@@ -681,7 +784,7 @@ static void cmd_print(const char *args) {
 		char existing[512] = "";
 		int elen = 0;
 
-		FAT_File *f = FAT_Open(fname);
+		FAT_File *f = FAT_Open(fpath);
 		if (f) {
 			elen = FAT_Read(f, sizeof(existing) - 1, existing);
 			existing[elen] = '\0';
@@ -704,10 +807,10 @@ static void cmd_print(const char *args) {
 		combined[clen++] = '\n';
 		combined[clen] = '\0';
 
-		if (FAT_WriteFile(fname, combined, clen))
-			printf("\nAppended to %s\n", fname);
+		if (FAT_WriteFile(fpath, combined, clen))
+			printf("\nAppended to %s\n", fpath);
 		else
-			printf("\nFailed to write %s\n", fname);
+			printf("\nFailed to write %s\n", fpath);
 	} else {
 		// Overwrite
 		char buf[LINE_MAX + 2];
@@ -719,10 +822,10 @@ static void cmd_print(const char *args) {
 		buf[blen++] = '\n';
 		buf[blen] = '\0';
 
-		if (FAT_WriteFile(fname, buf, blen))
-			printf("\nWrote to %s\n", fname);
+		if (FAT_WriteFile(fpath, buf, blen))
+			printf("\nWrote to %s\n", fpath);
 		else
-			printf("\nFailed to write %s\n", fname);
+			printf("\nFailed to write %s\n", fpath);
 	}
 }
 
@@ -765,9 +868,21 @@ static void ls_callback(const char *name, bool isDir, uint32_t size) {
 }
 
 static void cmd_ls(const char *args) {
-	const char *path = sh_skip(args);
-	if (*path == '\0')
-		path = "/";
+	const char *arg = sh_skip(args);
+	char path[256];
+
+	if (*arg == '\0') {
+		// List CWD
+		int i = 0;
+		while (g_CWD[i] && i < 255) {
+			path[i] = g_CWD[i];
+			i++;
+		}
+		path[i] = '\0';
+	} else {
+		build_path(arg, path, sizeof(path));
+	}
+
 	printf("\nContents of %s:\n", path);
 	if (!FAT_ListDir(path, ls_callback))
 		printf("  (no such directory)\n");
@@ -780,10 +895,12 @@ static void cmd_touch(const char *args) {
 		printf("\nUsage: touch <filename>\n");
 		return;
 	}
-	if (FAT_CreateFile(name))
-		printf("\nCreated: %s\n", name);
+	char path[256];
+	build_path(name, path, sizeof(path));
+	if (FAT_CreateFile(path))
+		printf("\nCreated: %s\n", path);
 	else
-		printf("\nFailed to create: %s\n", name);
+		printf("\nFailed to create: %s\n", path);
 }
 
 static void cmd_mkdir(const char *args) {
@@ -792,10 +909,12 @@ static void cmd_mkdir(const char *args) {
 		printf("\nUsage: mkdir <dirname>\n");
 		return;
 	}
-	if (FAT_CreateDir(name))
-		printf("\nCreated directory: %s\n", name);
+	char path[256];
+	build_path(name, path, sizeof(path));
+	if (FAT_CreateDir(path))
+		printf("\nCreated directory: %s\n", path);
 	else
-		printf("\nFailed to create directory: %s\n", name);
+		printf("\nFailed to create directory: %s\n", path);
 }
 
 static void cmd_rm(const char *args) {
@@ -804,10 +923,12 @@ static void cmd_rm(const char *args) {
 		printf("\nUsage: rm <filename>\n");
 		return;
 	}
-	if (FAT_DeleteEntry(name))
-		printf("\nDeleted: %s\n", name);
+	char path[256];
+	build_path(name, path, sizeof(path));
+	if (FAT_DeleteEntry(path))
+		printf("\nDeleted: %s\n", path);
 	else
-		printf("\nNot found: %s\n", name);
+		printf("\nNot found: %s\n", path);
 }
 
 static void cmd_rmdir(const char *args) {
@@ -821,13 +942,13 @@ static void cmd_cat(const char *args) {
 		printf("\nUsage: cat <filename>\n");
 		return;
 	}
-
-	FAT_File *f = FAT_Open(name);
+	char path[256];
+	build_path(name, path, sizeof(path));
+	FAT_File *f = FAT_Open(path);
 	if (!f) {
-		printf("\nNot found: %s\n", name);
+		printf("\nNot found: %s\n", path);
 		return;
 	}
-
 	printf("\n");
 	uint8_t buf[64];
 	uint32_t n;
@@ -883,6 +1004,7 @@ static const Command g_Commands[] = {
 	{"cow", cmd_cow},
 	{"reboot", cmd_reboot},
 	{"shutdown", cmd_shutdown},
+	{"cd", cmd_cd},
 };
 
 #define NUM_COMMANDS (int)(sizeof(g_Commands) / sizeof(g_Commands[0]))
@@ -921,7 +1043,7 @@ void Shell_Initialize() {
 	g_LineReady = false;
 }
 
-static void print_prompt() { printf("\nuamios> "); }
+static void print_prompt() { printf("\nuser@uami:%s> ", g_CWD); }
 
 void Shell_Run() {
 	print_prompt();
