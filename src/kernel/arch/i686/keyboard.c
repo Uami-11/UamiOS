@@ -26,8 +26,17 @@ static const char g_ScanToAsciiShift[] = {
 #define SCANCODE_BACKSPACE 0x0E
 #define SCANCODE_CAPS 0x3A
 
+// Add these defines at the top with the other scancodes:
+#define SCANCODE_PAGEUP 0x49
+#define SCANCODE_PAGEDOWN 0x51
+
+// Special non-ASCII sentinel values put into the key buffer
+#define KEY_PAGEUP 0x01
+#define KEY_PAGEDOWN 0x02
+
 static bool g_ShiftHeld = false;
 static bool g_CapsLock = false;
+static bool g_ExtendedKey = false;
 
 // Shell input buffer — filled by keyboard, consumed by shell
 #define KEY_BUFFER_SIZE 256
@@ -56,6 +65,25 @@ int Keyboard_HasChar() { return g_KeyHead != g_KeyTail; }
 
 static void keyboard_handler(Registers *regs) {
 	uint8_t scancode = i686_inb(KEYBOARD_DATA_PORT);
+	if (scancode == 0xE0) {
+		g_ExtendedKey = true;
+		return;
+	}
+
+	if (g_ExtendedKey) {
+		g_ExtendedKey = false;
+		if (scancode == SCANCODE_PAGEUP) {
+			Keyboard_PutChar(KEY_PAGEUP);
+			return;
+		}
+		if (scancode == SCANCODE_PAGEDOWN) {
+			Keyboard_PutChar(KEY_PAGEDOWN);
+			return;
+		}
+		if (scancode & 0x80)
+			return; // extended key release, ignore
+		return;
+	}
 
 	// Shift press/release
 	if (scancode == SCANCODE_LSHIFT || scancode == SCANCODE_RSHIFT) {
@@ -97,6 +125,14 @@ static void keyboard_handler(Registers *regs) {
 			printf("%c", c); // echo to screen
 			Keyboard_PutChar(c);
 		}
+	}
+	if (scancode == SCANCODE_PAGEUP) {
+		Keyboard_PutChar(KEY_PAGEUP);
+		return;
+	}
+	if (scancode == SCANCODE_PAGEDOWN) {
+		Keyboard_PutChar(KEY_PAGEDOWN);
+		return;
 	}
 }
 

@@ -4,6 +4,7 @@
 #include "scheduler.h"
 #include <arch/i686/io.h>
 #include <arch/i686/keyboard.h>
+#include <arch/i686/vga_text.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -836,8 +837,12 @@ void Shell_Run() {
 		}
 
 		char c = Keyboard_GetChar();
-
-		if (c == '\n' || c == '\r') {
+		if (c == KEY_PAGEUP) {
+			VGA_ScrollUp(5);
+			// don't add to line buffer, don't echo
+		} else if (c == KEY_PAGEDOWN) {
+			VGA_ScrollDown(5);
+		} else if (c == '\n' || c == '\r') {
 			g_Line[g_LineLen] = '\0';
 			printf("\n");
 			dispatch(g_Line);
