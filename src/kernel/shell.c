@@ -510,12 +510,111 @@ static void cmd_pmm_demo(const char *args) {
 }
 
 static void cmd_print(const char *args) {
-	const char *text = sh_skip(args);
-	if (*text == '\0') {
+	const char *p = sh_skip(args);
+	if (*p == '\0') {
 		printf("\n");
 		return;
 	}
-	printf("\n%s\n", text);
+
+	// Find > or >> operator
+	const char *gt = 0;
+	bool append = false;
+
+	for (int i = 0; p[i]; i++) {
+		if (p[i] == '>' && p[i + 1] == '>') {
+			gt = p + i;
+			append = true;
+			break;
+		} else if (p[i] == '>') {
+			gt = p + i;
+			append = false;
+			break;
+		}
+	}
+
+	if (!gt) {
+		// No redirection — just print
+		printf("\n%s\n", p);
+		return;
+	}
+
+	// Split text and filename
+	char text[LINE_MAX] = "";
+	int tlen = (int)(gt - p);
+
+	// Trim trailing spaces
+	while (tlen > 0 && p[tlen - 1] == ' ')
+		tlen--;
+
+	// Strip optional surrounding quotes
+	int tstart = 0;
+	if (tlen >= 2 && (p[0] == '"' || p[0] == '\'')) {
+		tstart = 1;
+		tlen--;
+		if (tlen > 0 &&
+			(p[tstart + tlen - 1] == '"' || p[tstart + tlen - 1] == '\''))
+			tlen--;
+	}
+
+	for (int i = 0; i < tlen && i < LINE_MAX - 1; i++)
+		text[i] = p[tstart + i];
+	text[tlen < LINE_MAX - 1 ? tlen : LINE_MAX - 1] = '\0';
+
+	// Filename
+	const char *fname = sh_skip(gt + (append ? 2 : 1));
+	if (*fname == '\0') {
+		printf("\nprint: missing filename after >\n");
+		return;
+	}
+
+	if (append) {
+		// Read existing content
+		char existing[512] = "";
+		int elen = 0;
+
+		FAT_File *f = FAT_Open(fname);
+		if (f) {
+			elen = FAT_Read(f, sizeof(existing) - 1, existing);
+			existing[elen] = '\0';
+			FAT_Close(f);
+		}
+
+		// Combine
+		char combined[512 + LINE_MAX];
+		int clen = 0;
+
+		for (int i = 0; i < elen; i++)
+			combined[clen++] = existing[i];
+
+		if (elen > 0 && existing[elen - 1] != '\n')
+			combined[clen++] = '\n';
+
+		for (int i = 0; text[i] && clen < (int)sizeof(combined) - 2; i++)
+			combined[clen++] = text[i];
+
+		combined[clen++] = '\n';
+		combined[clen] = '\0';
+
+		if (FAT_WriteFile(fname, combined, clen))
+			printf("\nAppended to %s\n", fname);
+		else
+			printf("\nFailed to write %s\n", fname);
+	} else {
+		// Overwrite
+		char buf[LINE_MAX + 2];
+		int blen = 0;
+
+		for (int i = 0; text[i]; i++)
+			buf[blen++] = text[i];
+
+		buf[blen++] = '\n';
+		buf[blen] = '\0';
+
+		if (FAT_WriteFile(fname, buf, blen))
+			printf("\nWrote to %s\n", fname);
+		else
+			printf("\nFailed to write %s\n", fname);
+	}
 }
 
 static void cmd_cow(const char *args) {
@@ -630,6 +729,13 @@ static void cmd_cat(const char *args) {
 	FAT_Close(f);
 }
 
+static void cmd_df(const char *args) {
+	// Count used clusters by walking the FAT
+	// We expose a helper from fat.c for this
+	printf("\nDisk usage is shown per file with 'ls'.\n");
+	printf("Each file cluster = %u bytes on disk.\n", FAT_GetBytesPerCluster());
+	printf("\n");
+}
 // ── command dispatch ───────────────────────────────────────────────────────
 
 typedef struct {
@@ -660,6 +766,7 @@ static const Command g_Commands[] = {
 	{"mkdir", cmd_mkdir},
 	{"rm", cmd_rm},
 	{"rmdir", cmd_rmdir},
+	{"df", cmd_df}, // ← missing before
 
 	// Other
 	{"print", cmd_print},

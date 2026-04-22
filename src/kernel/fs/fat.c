@@ -484,17 +484,27 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 			continue;
 
 		// Convert 8.3 name to readable string
+		// Replace the name conversion block in FAT_ListDir with this:
 		char name[13];
 		int pos = 0;
-		for (int i = 0; i < 8 && entry.Name[i] != ' '; i++)
+
+		// base name (8 chars, trim trailing spaces)
+		int base_end = 8;
+		while (base_end > 0 && entry.Name[base_end - 1] == ' ')
+			base_end--;
+		for (int i = 0; i < base_end; i++)
 			name[pos++] = entry.Name[i];
-		if (entry.Name[8] != ' ') {
+
+		// extension (3 chars, trim trailing spaces)
+		int ext_end = 11;
+		while (ext_end > 8 && entry.Name[ext_end - 1] == ' ')
+			ext_end--;
+		if (ext_end > 8) {
 			name[pos++] = '.';
-			for (int i = 8; i < 11 && entry.Name[i] != ' '; i++)
+			for (int i = 8; i < ext_end; i++)
 				name[pos++] = entry.Name[i];
 		}
 		name[pos] = '\0';
-
 		bool isDir = (entry.Attributes & FAT_ATTRIBUTE_DIRECTORY) != 0;
 		cb(name, isDir, entry.Size);
 	}
@@ -820,4 +830,8 @@ bool FAT_WriteFile(const char *path, const void *data, uint32_t size) {
 	}
 not_found:
 	return false;
+}
+
+uint32_t FAT_GetBytesPerCluster() {
+	return g_Data->BS.BootSector.SectorsPerCluster * SECTOR_SIZE;
 }

@@ -49,3 +49,4 @@ bool FAT_WriteFile(const char *path, const void *data, uint32_t size);
 // Directory listing — calls callback for each entry
 typedef void (*FAT_ListCallback)(const char *name, bool isDir, uint32_t size);
 bool FAT_ListDir(const char *path, FAT_ListCallback cb);
+uint32_t FAT_GetBytesPerCluster();
