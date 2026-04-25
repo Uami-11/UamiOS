@@ -477,6 +477,7 @@ bool FAT_ListDir(const char *path, FAT_ListCallback cb) {
 	FAT_DirectoryEntry entry;
 
 	while (FAT_ReadEntry(dir, &entry)) {
+		//
 		// // Temporarily add to FAT_ListDir after reading entry, before
 		// filtering: if (entry.Name[0] != 0x00 && (uint8_t)entry.Name[0] !=
 		// 0xE5) {
