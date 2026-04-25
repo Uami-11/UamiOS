@@ -2,12 +2,48 @@
 #include "fs/fat.h"
 #include "pmm.h"
 #include "scheduler.h"
+#include "thread.h"
 #include <arch/i686/io.h>
 #include <arch/i686/keyboard.h>
 #include <arch/i686/vga_text.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+
+static volatile int g_SharedCounter = 0;
+static volatile int g_ThreadDemoRunning = 0;
+
+static void counter_thread_1() {
+	while (g_ThreadDemoRunning) {
+		g_SharedCounter++;
+		Thread_Sleep(50); // sleep 50 ticks ~0.5s
+	}
+	Thread_Kill(Thread_GetCount() - 2); // self-cleanup
+	for (;;)
+		Thread_Yield();
+}
+
+static void counter_thread_2() {
+	while (g_ThreadDemoRunning) {
+		g_SharedCounter += 10;
+		Thread_Sleep(75);
+	}
+	Thread_Kill(Thread_GetCount() - 1);
+	for (;;)
+		Thread_Yield();
+}
+
+static void counter_thread_3() {
+	while (g_ThreadDemoRunning) {
+		if (g_SharedCounter > 100) {
+			printf("\n[watchdog] counter exceeded 100, resetting\n");
+			g_SharedCounter = 0;
+		}
+		Thread_Sleep(100);
+	}
+	for (;;)
+		Thread_Yield();
+}
 
 // ── string helpers (no stdlib) ─────────────────────────────────────────────
 
@@ -153,6 +189,58 @@ static void cmd_help(const char *args) {
 	printf("    print <x>   echo text\n");
 	printf("    cow         a friendly cow\n");
 	printf("\n");
+}
+
+static void cmd_thread_demo(const char *args) {
+	printf("\n");
+	printf("Thread Demo - Shared Resource\n");
+	printf("------------------------------\n");
+	printf("3 threads share a counter:\n");
+	printf("  thread_1: increments by 1  every ~0.5s\n");
+	printf("  thread_2: increments by 10 every ~0.75s\n");
+	printf("  thread_3: watchdog - resets counter when > 100\n");
+	printf("\nPress Enter to stop.\n\n");
+
+	g_SharedCounter = 0;
+	g_ThreadDemoRunning = 1;
+
+	ThreadID t1 = Thread_Create("thread_1", counter_thread_1);
+	ThreadID t2 = Thread_Create("thread_2", counter_thread_2);
+	ThreadID t3 = Thread_Create("thread_3", counter_thread_3);
+
+	uint32_t last = Scheduler_GetTicks();
+
+	while (1) {
+		uint32_t now = Scheduler_GetTicks();
+
+		// Print counter state every second
+		if (now - last >= 100) {
+			last = now;
+			printf("  counter = %d  |  t1 scheduled %u  t2 scheduled %u  t3 "
+				   "scheduled %u\n",
+				   g_SharedCounter, Scheduler_GetScheduleCount(t1),
+				   Scheduler_GetScheduleCount(t2),
+				   Scheduler_GetScheduleCount(t3));
+		}
+
+		if (Keyboard_HasChar()) {
+			char c = Keyboard_GetChar();
+			if (c == '\n' || c == '\r') {
+				g_ThreadDemoRunning = 0;
+				break;
+			}
+		}
+
+		if (g_NeedSchedule) {
+			g_NeedSchedule = 0;
+			Scheduler_Yield();
+		}
+	}
+
+	Thread_Kill(t1);
+	Thread_Kill(t2);
+	Thread_Kill(t3);
+	printf("\nThread demo stopped. Final counter: %d\n", g_SharedCounter);
 }
 
 static void cmd_clear(const char *args) {
@@ -361,11 +449,11 @@ static void cmd_utop(const char *args) {
 	int count = Scheduler_GetTaskCount();
 
 	printf("\n");
-	printf("  UamiOS Task Manager (utop)\n");
-	printf("  --------------------------\n");
-	printf("  Tasks: %d running / %d max slots\n", count, MAX_TASKS);
-	printf("  Scheduler: Round-Robin, quantum = 500 timer ticks (~5s)\n");
-	printf("  Timer: 100 Hz\n");
+	printf("  UamiOS Thread Manager (utop)\n");
+	printf("  -----------------------------\n");
+	printf("  Threading model: cooperative + preemptive kernel threads\n");
+	printf("  All threads share the same address space (kernel space)\n");
+	printf("  Scheduler: Round-Robin, quantum = 500 timer ticks\n");
 	printf("\n");
 
 	// Header
@@ -1005,6 +1093,7 @@ static const Command g_Commands[] = {
 	{"reboot", cmd_reboot},
 	{"shutdown", cmd_shutdown},
 	{"cd", cmd_cd},
+	{"thread_demo", cmd_thread_demo},
 };
 
 #define NUM_COMMANDS (int)(sizeof(g_Commands) / sizeof(g_Commands[0]))
