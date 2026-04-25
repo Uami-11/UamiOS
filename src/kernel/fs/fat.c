@@ -890,17 +890,33 @@ uint32_t FAT_GetBytesPerCluster() {
 bool FAT_GetDiskInfo(FAT_DiskInfo *info) {
 	uint8_t spc = g_Data->BS.BootSector.SectorsPerCluster;
 	info->BytesPerCluster = spc * SECTOR_SIZE;
-	info->TotalClusters = (g_TotalSectors - g_DataSectionLba) / spc;
+
+	uint32_t dataSectors = g_TotalSectors - g_DataSectionLba;
+	info->TotalClusters = dataSectors / spc;
 	info->FreeClusters = 0;
 
-	// Walk the FAT counting free clusters (cluster 0 entry = FAT32)
 	uint32_t total = info->TotalClusters;
-	if (total > 65536)
-		total = 65536; // cap scan to avoid slowness
+	if (total > 60000)
+		total = 60000;
 
-	for (uint32_t c = 2; c < total + 2; c++) {
-		if (fat_next_cluster(c) == 0)
-			info->FreeClusters++;
+	// Read FAT sectors directly in chunks instead of one cluster at a time
+	uint8_t buf[SECTOR_SIZE];
+	uint32_t fatStart = g_Data->BS.BootSector.ReservedSectors;
+	uint32_t fatSectors = g_SectorsPerFat;
+	uint32_t clustersChecked = 0;
+
+	for (uint32_t s = 0; s < fatSectors && clustersChecked < total; s++) {
+		disk_read(fatStart + s, 1, buf);
+		// Each sector holds SECTOR_SIZE/4 = 128 FAT32 entries
+		uint32_t *entries = (uint32_t *)buf;
+		for (int e = 0; e < SECTOR_SIZE / 4 && clustersChecked < total; e++) {
+			if (clustersChecked >= 2) { // clusters 0 and 1 are reserved
+				if ((entries[e] & 0x0FFFFFFF) == 0)
+					info->FreeClusters++;
+			}
+			clustersChecked++;
+		}
 	}
+
 	return true;
 }

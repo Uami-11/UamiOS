@@ -148,46 +148,46 @@ static void build_path(const char *name, char *out, int outSize) {
 }
 
 // ── commands ───────────────────────────────────────────────────────────────
-
 static void cmd_help(const char *args) {
 	printf("\n");
-	printf("UamiOS Shell - available commands:\n");
-	printf("\n");
+	printf("UamiOS Shell - available commands\n");
+	printf("=================================\n");
 
-	printf("  System:\n");
-	printf("    help        show this message\n");
-	printf("    clear       clear the screen\n");
-	printf("    version     OS version info\n");
-	printf("    fastfetch   system information\n");
-	printf("    reboot      restart the system\n");
-	printf("    shutdown    power off the system\n");
-	printf("\n");
+	printf("\n[ System ]\n");
+	printf("  help            Show this message\n");
+	printf("  clear           Clear the screen\n");
+	printf("  version         Show OS version info\n");
+	printf("  fastfetch       Display system information\n");
+	printf("  reboot          Restart the system\n");
+	printf("  shutdown        Power off the system\n");
 
-	printf("  Memory:\n");
-	printf("    meminfo     physical memory usage\n");
-	printf("    pmm_demo    interactive page allocator demo\n");
-	printf("\n");
+	printf("\n[ Memory ]\n");
+	printf("  meminfo         Show physical memory usage\n");
+	printf("  pmm_demo        Page allocator demonstration\n");
 
-	printf("  Scheduling:\n");
-	printf("    utop        show tasks + schedule counts\n");
-	printf("    sched_demo  round-robin scheduler demo\n");
-	printf("    create <n>  create a new counting task (demo use)\n");
-	printf("    kill <id>   kill a task by ID\n");
-	printf("\n");
+	printf("\n[ Scheduling ]\n");
+	printf("  utop            Show tasks and scheduling stats\n");
+	printf("  sched_demo      Round-robin scheduler demo\n");
+	printf("  thread_demo     Shared counter threading demo\n");
+	printf("  create <name>   Register demo task (future use)\n");
+	printf("  kill <id>       Kill task by ID\n");
 
-	printf("  Filesystem:\n");
-	printf("    cd [dir]   change directory (cd .. to go up)\n");
-	printf("    ls [path]   list directory contents\n");
-	printf("    cat <file>  display file contents\n");
-	printf("    touch <f>   create empty file\n");
-	printf("    mkdir <d>   create directory\n");
-	printf("    rm <name>   delete file\n");
-	printf("    rmdir <d>   delete directory\n");
-	printf("\n");
+	printf("\n[ Filesystem ]\n");
+	printf("  cd [dir]        Change directory (cd .. to go up)\n");
+	printf("  ls [path]       List directory contents\n");
+	printf("  cat <file>      Display file contents\n");
+	printf("  touch <file>    Create empty file\n");
+	printf("  mkdir <dir>     Create directory\n");
+	printf("  rm <name>       Delete file\n");
+	printf("  rmdir <dir>     Delete directory\n");
+	printf("  df              Show disk/cluster info\n");
 
-	printf("  Other:\n");
-	printf("    print <x>   echo text\n");
-	printf("    cow         a friendly cow\n");
+	printf("\n[ Other ]\n");
+	printf("  print <text>    Print text or redirect to file\n");
+	printf("                  Usage: print \"hello\" > file.txt\n");
+	printf("                         print \"hi\" >> file.txt\n");
+	printf("  cow             Display a friendly cow\n");
+
 	printf("\n");
 }
 
