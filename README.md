@@ -3,6 +3,9 @@
 Made an operating system. I based if off of [NanoByte](https://youtube.com/playlist?list=PLFjM7v6KGMpiH2G-kT781ByCNC_0pKpPN&si=ywS0AYSzldNTsXI4)'s tutorial and from there I added a shell and stuff. I implemented memory management, CPU scheduling, interrupt handling, threading, and a FAT32 filesystem.
 
 ## Showcase
+<img width="1280" height="720" alt="showcase" src="https://github.com/user-attachments/assets/3253b5b1-5eb7-42fb-9895-78099951f1c3" />
+
+> I will make a better showcase in the future
 
 ## Building
 
